@@ -1,0 +1,23 @@
+# permissions for end users to view autodeploys.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: autodeploy
+    app.kubernetes.io/managed-by: kustomize
+  name: autodeploy-viewer-role
+rules:
+- apiGroups:
+  - operator.wnguddn777.com
+  resources:
+  - autodeploys
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - operator.wnguddn777.com
+  resources:
+  - autodeploys/status
+  verbs:
+  - get

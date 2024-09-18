@@ -1,0 +1,11 @@
+apiVersion: operator.wnguddn777.com/v1alpha1
+kind: AutoDeploy
+metadata:
+  labels:
+    app.kubernetes.io/name: autodeploy
+    app.kubernetes.io/managed-by: kustomize
+  name: autodeploy-sample
+spec:
+  image: wnguddn777/flask-ml-app
+  memberCluster: member2
+  replicas: 1

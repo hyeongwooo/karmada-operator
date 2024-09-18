@@ -1,0 +1,27 @@
+# permissions for end users to edit autodeploys.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: autodeploy
+    app.kubernetes.io/managed-by: kustomize
+  name: autodeploy-editor-role
+rules:
+- apiGroups:
+  - operator.wnguddn777.com
+  resources:
+  - autodeploys
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - operator.wnguddn777.com
+  resources:
+  - autodeploys/status
+  verbs:
+  - get
