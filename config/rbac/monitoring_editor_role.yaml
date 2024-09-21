@@ -1,8 +1,11 @@
----
+# permissions for end users to edit monitorings.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  labels:
+    app.kubernetes.io/name: autodeploy
+    app.kubernetes.io/managed-by: kustomize
+  name: monitoring-editor-role
 rules:
 - apiGroups:
   - operator.wnguddn777.com
@@ -19,14 +22,6 @@ rules:
 - apiGroups:
   - operator.wnguddn777.com
   resources:
-  - monitorings/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - operator.wnguddn777.com
-  resources:
   - monitorings/status
   verbs:
   - get
-  - patch
-  - update

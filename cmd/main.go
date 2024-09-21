@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	policyv1alpha1 "github.com/karmada-io/karmada/pkg/apis/policy/v1alpha1"
+
 	operatorv1alpha1 "github.com/wnguddn777.com/autodeploy/api/v1alpha1"
 	"github.com/wnguddn777.com/autodeploy/internal/controller"
 	//+kubebuilder:scaffold:imports
@@ -130,6 +131,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AutoDeploy")
+		os.Exit(1)
+	}
+	if err = (&controller.MonitoringReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Monitoring")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

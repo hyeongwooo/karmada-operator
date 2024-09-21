@@ -1,0 +1,12 @@
+apiVersion: operator.wnguddn777.com/v1alpha1
+kind: Monitoring
+metadata:
+  labels:
+    app.kubernetes.io/name: autodeploy
+    app.kubernetes.io/managed-by: kustomize
+  name: monitoring-sample
+spec:
+  model: Alexnet
+  edge:
+  - member2
+  core: member4
