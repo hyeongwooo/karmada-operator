@@ -21,59 +21,80 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-
+	"github.com/wnguddn777.com/autodeploy/internal/utils"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	operatorv1alpha1 "github.com/wnguddn777.com/autodeploy/api/v1alpha1"
-	// "github.com/wnguddn777.com/autodeploy/internal/prom_op"
 )
 
-// MonitoringReconciler reconciles a Monitoring object
+const monitoringFinalizer = "operator.wnguddn777.com/finalizer"
+
 type MonitoringReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=operator.wnguddn777.com,resources=monitorings,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=operator.wnguddn777.com,resources=monitorings/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=operator.wnguddn777.com,resources=monitorings/finalizers,verbs=update
-
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Monitoring object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.17.3/pkg/reconcile
-
-// split_point 함수: Karmada의 Prometheus API를 사용하여 CPU 리소스를 확인하고 split point를 결정합니다.
 func split_point() int {
-	// cpuUsage, err := prom_op.GetClusterCPUUsage(cluster, prometheusURL) // prom_op 모듈 사용
-	// if err != nil {
-	// 	fmt.Printf("Failed to get CPU usage for cluster %s: %v\n", cluster, err)
-	// 	return 1 // 기본 값
-	// }
-
-	// // CPU 사용량을 기준으로 split point 결정
-	// if cpuUsage < 50 {
-	// 	return 1
-	// } else if cpuUsage < 70 {
-	// 	return 2
-	// }
-	// return 3
 	return 2
 }
 
-// CreateAutoDeploy 함수: AutoDeploy CR을 생성합니다.
+func (r *MonitoringReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := r.Log.WithValues("monitoring", req.NamespacedName)
+
+	var monitoring operatorv1alpha1.Monitoring
+	if err := r.Get(ctx, req.NamespacedName, &monitoring); err != nil {
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	// 파이널라이저 처리
+	if monitoring.ObjectMeta.DeletionTimestamp.IsZero() {
+		if !utils.ContainsString(monitoring.GetFinalizers(), monitoringFinalizer) {
+			controllerutil.AddFinalizer(&monitoring, monitoringFinalizer)
+			if err := r.Update(ctx, &monitoring); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if utils.ContainsString(monitoring.GetFinalizers(), monitoringFinalizer) {
+			if err := r.deleteExternalResources(ctx, &monitoring); err != nil {
+				return ctrl.Result{}, err
+			}
+			controllerutil.RemoveFinalizer(&monitoring, monitoringFinalizer)
+			if err := r.Update(ctx, &monitoring); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	splitPoint := split_point()
+
+	for _, edge := range monitoring.Spec.Edge {
+		image := fmt.Sprintf("bono1130/head-model-%d", splitPoint)
+		if err := r.createOrUpdateAutoDeploy(ctx, image, edge, &monitoring); err != nil {
+			log.Error(err, "Failed to create or update Head AutoDeploy")
+			return ctrl.Result{}, err
+		}
+	}
+
+	image := fmt.Sprintf("bono1130/tail-model-%d", splitPoint)
+	if err := r.createOrUpdateAutoDeploy(ctx, image, monitoring.Spec.Core, &monitoring); err != nil {
+		log.Error(err, "Failed to create or update Tail AutoDeploy")
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
 func CreateAutoDeploy(image, memberCluster string) *operatorv1alpha1.AutoDeploy {
 	return &operatorv1alpha1.AutoDeploy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -83,53 +104,56 @@ func CreateAutoDeploy(image, memberCluster string) *operatorv1alpha1.AutoDeploy 
 		Spec: operatorv1alpha1.AutoDeploySpec{
 			Image:         image,
 			MemberCluster: memberCluster,
-			Replicas:      1,
+			Replicas:      1, // 기본값으로 1을 설정, 필요에 따라 조정 가능
 		},
 	}
 }
 
-// Reconcile 함수: Monitoring CR의 변화를 감지하여 적절한 작업을 수행합니다.
-func (r *MonitoringReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("monitoring", req.NamespacedName)
+func (r *MonitoringReconciler) createOrUpdateAutoDeploy(ctx context.Context, image, memberCluster string, monitoring *operatorv1alpha1.Monitoring) error {
+	autoDeploy := CreateAutoDeploy(image, memberCluster)
+	if err := controllerutil.SetControllerReference(monitoring, autoDeploy, r.Scheme); err != nil {
+		return err
+	}
 
-	// Monitoring CR 인스턴스 가져오기
-	var monitoring operatorv1alpha1.Monitoring
-	if err := r.Get(ctx, req.NamespacedName, &monitoring); err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("Monitoring resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
+	if err := r.Create(ctx, autoDeploy); err != nil {
+		if errors.IsAlreadyExists(err) {
+			existing := &operatorv1alpha1.AutoDeploy{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(autoDeploy), existing); err != nil {
+				return err
+			}
+			existing.Spec = autoDeploy.Spec
+			return r.Update(ctx, existing)
 		}
-		log.Error(err, "Failed to get Monitoring")
-		return ctrl.Result{}, err
+		return err
 	}
-
-	// Edge 필드 순회 및 splitPoint 지역 변수 선언
-	splitPoint := split_point()
-
-	// Prometheus URL 설정
-	//prometheusURL := "http://prometheus-karmada-url/api/v1"
-
-	// Edge 클러스터 CPU 사용량을 확인하고 AutoDeploy 생성
-	for _, edge := range monitoring.Spec.Edge {
-
-		image := fmt.Sprintf("bono1130/head-model-%d", splitPoint)
-		autoDeploy := CreateAutoDeploy(image, edge)
-		if err := r.Create(ctx, autoDeploy); err != nil {
-			log.Error(err, "Failed to create Head AutoDeploy")
-			return reconcile.Result{}, err
-		}
-	}
-
-	// Core 필드를 보고 Tail AutoDeploy 생성
-	image := fmt.Sprintf("bono1130/tail-model-%d", splitPoint)
-	tailDeploy := CreateAutoDeploy(image, monitoring.Spec.Core)
-	if err := r.Create(ctx, tailDeploy); err != nil {
-		log.Error(err, "Failed to create Tail AutoDeploy")
-		return reconcile.Result{}, err
-	}
-
-	return reconcile.Result{}, nil
+	return nil
 }
+
+func (r *MonitoringReconciler) deleteExternalResources(ctx context.Context, monitoring *operatorv1alpha1.Monitoring) error {
+	// AutoDeploy CR 삭제
+	autoDeployList := &operatorv1alpha1.AutoDeployList{}
+	if err := r.List(ctx, autoDeployList, client.InNamespace(monitoring.Namespace)); err != nil {
+		return err
+	}
+	for _, autoDeploy := range autoDeployList.Items {
+		if err := r.Delete(ctx, &autoDeploy); err != nil && !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+// SetupWithManager 함수는 그대로 유지
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MonitoringReconciler) SetupWithManager(mgr ctrl.Manager) error {

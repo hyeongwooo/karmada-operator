@@ -29,6 +29,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -126,10 +127,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.AutoDeployReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	// Karmada client 설정 추가
+	karmadaConfig, err := ctrl.GetConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to get Karmada config")
+		os.Exit(1)
+	}
+	karmadaClient, err := client.New(karmadaConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "unable to create Karmada client")
+		os.Exit(1)
+	}
+
+	autoDeployReconciler := &controller.AutoDeployReconciler{
+		Client:        mgr.GetClient(),
+		KarmadaClient: karmadaClient, // Karmada client 할당
+		Scheme:        mgr.GetScheme(),
+	}
+
+	if err := autoDeployReconciler.SetupWithManager(mgr, karmadaClient); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AutoDeploy")
 		os.Exit(1)
 	}
